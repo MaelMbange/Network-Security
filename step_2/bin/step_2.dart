@@ -2,10 +2,41 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:args/args.dart';
 import 'package:pointycastle/export.dart';
 
 Future<void> main(List<String> arguments) async {
-  ServerSocket.bind(InternetAddress.anyIPv4, 8888).then((serverSocket) {
+  var parser = ArgParser()
+    ..addOption(
+      'port',
+      abbr: 'p',
+      defaultsTo: '8888',
+      callback: (value) {
+        if (value != null) {
+          var port = int.tryParse(value);
+          if (port == null || port < 0 || port > 65535) {
+            print('Invalid port number: $value');
+            exit(64);
+          }
+        }
+      },
+      help: 'Port to listen on',
+    )
+    ..addFlag(
+      'help',
+      abbr: 'h',
+      help: 'Show this help message',
+      negatable: false,
+    );
+
+  var results = parser.parse(arguments);
+  if (results['help'] as bool) {
+    print(parser.usage);
+    return;
+  }
+  final port = int.parse(results['port']);
+
+  ServerSocket.bind(InternetAddress.anyIPv4, port).then((serverSocket) {
     print(
       'Server[🔁]: is running on ${serverSocket.address.address}:${serverSocket.port}',
     );
