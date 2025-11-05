@@ -135,8 +135,12 @@ void _handleClient(Socket socket) {
   BigInt? pka;
   BigInt? Z;
 
-  Uint8List aesKey;
+  Uint8List? aesKey;
   AsymmetricKeyPair<RSAPublicKey, RSAPrivateKey> pair;
+
+  Uint8List? transcriptHash;
+  RSAPublicKey? pubc;
+
 
   utf8.decoder
       .bind(socket)
@@ -167,8 +171,8 @@ void _handleClient(Socket socket) {
                   ..._toFixedLengh(pkb, 256),
                 ]);
 
-                var transcriptHash = sha256.process(list);
-                var password = base64.encode(transcriptHash);
+                transcriptHash = sha256.process(list);
+                var password = base64.encode(transcriptHash!);
                 print('Server[🔑 - PASSWORD]: $password');
 
                 var pbkdf2 = KeyDerivator('SHA-256/HMAC/PBKDF2')
@@ -200,26 +204,75 @@ void _handleClient(Socket socket) {
                 final gcm = GCMBlockCipher(AESEngine())
                   ..init(
                     true,
-
                     AEADParameters(
-                      KeyParameter(aesKey),
+                      KeyParameter(aesKey!),
                       128,
                       nonce,
-                      transcriptHash,
+                      transcriptHash!,
                     ),
                   );
 
                 //wanna die, got to generate a X.509 / SubjectPublicKeyInfo DER  from scratch
-                final spkiDer = _createX509SPKI(publicKey);
-                print('Server[🔑 - SPKI DER]: ${base64.encode(spkiDer)}');
+                final derS = _createX509SPKI(publicKey);
+                print('Server[🔑 - SPKI DER]: ${base64.encode(derS)}');
 
                 final nonceAndCt = Uint8List.fromList([
                   ...nonce,
-                  ...gcm.process(spkiDer),
+                  ...gcm.process(derS),
                 ]);
 
                 print('Server[🔑 - NONCE+CT]: ${base64.encode(nonceAndCt)}');
                 socket.writeln('PUBS:${base64.encode(nonceAndCt)}');
+
+              case 'PUBC':
+                print('Client[🔑 - PUBC]: $body');
+                
+                try{
+                  final blob = base64.decode(body);
+                  if (transcriptHash == null || aesKey == null) {
+                    throw Exception('Missing transcript/aes key (send A first)');
+                }
+
+                final nonce = blob.sublist(0, 12);
+                final ct = blob.sublist(12);
+
+                final gcm = GCMBlockCipher(AESEngine())
+                  ..init(
+                    false,
+                    AEADParameters(
+                      KeyParameter(aesKey!),
+                      128,
+                      nonce,
+                      transcriptHash!,
+                    ),
+                  );
+
+                  final derC = gcm.process(ct);
+                  print('Client[🔑 - DERC]: ${base64.encode(derC)}');
+
+                  //Extract modulus and exponent from DER
+                  final asn1Parser = ASN1Parser(derC);
+                  final spki = asn1Parser.nextObject() as ASN1Sequence;
+
+                  final pkcs1key = spki.elements![1] as ASN1BitString;
+                  final pkcs1Parser = ASN1Parser(pkcs1key.stringValues as Uint8List);
+                  final pkcs1Seq = pkcs1Parser.nextObject() as ASN1Sequence;
+                  print('Client[🔑 - PKCS1SEQ]: $pkcs1Seq');
+                  print('Client[🔑 - ELEMENTS 1]: ${(pkcs1Seq.elements![0].encodedBytes).toString()}');                  
+                  print('Client[🔑 - ELEMENTS 2]: ${(pkcs1Seq.elements![1].encodedBytes).toString()}');
+
+                  final modulus  = decodeBigInt(pkcs1Seq.elements![0].encodedBytes!);
+                  final exponent = decodeBigInt(pkcs1Seq.elements![1].encodedBytes!);
+
+                  print('Client[🔑 - MODULUS]: $modulus');
+                  print('Client[🔑 - EXPONENT]: $exponent');
+
+                  pubc = RSAPublicKey(modulus, exponent);
+                  
+
+                }catch(e){
+                  print('Server[❌ - ERROR]: Failed to process PUBC - $e');
+                }
 
               case _:
                 print('Client[❓ - UNKNOWN]: $line');
