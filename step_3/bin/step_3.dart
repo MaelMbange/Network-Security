@@ -345,7 +345,6 @@ void _handleClient(Socket socket) {
 
                 pair = rsaGen.generateKeyPair();
                 final publicKey = pair!.publicKey;
-                final privateKey = pair!.privateKey;
 
                 var pubs = base64.encode(
                   pair!.publicKey.modulus.toString().codeUnits,
